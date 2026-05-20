@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kibble</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="window" data-tauri-drag-region>
+      <img id="cat" alt="" draggable="false" />
+      <div id="scroll">
+        <textarea
+          id="note"
+          placeholder="…"
+          spellcheck="false"
+          autocomplete="off"
+        ></textarea>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

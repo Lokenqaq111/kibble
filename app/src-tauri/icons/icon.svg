@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Rounded warm-cream background -->
+  <rect width="32" height="32" rx="5" ry="5" fill="#f2cfa4"/>
+  <!-- Subtle top shading -->
+  <rect x="1" y="1" width="30" height="2" rx="2" fill="#f8e0bd" opacity="0.7"/>
+
+  <!-- Ears (brown outer) -->
+  <rect x="6" y="5" width="2" height="2" fill="#3a2a18"/>
+  <rect x="5" y="7" width="4" height="2" fill="#3a2a18"/>
+  <rect x="24" y="5" width="2" height="2" fill="#3a2a18"/>
+  <rect x="23" y="7" width="4" height="2" fill="#3a2a18"/>
+  <!-- Ear inner (pink) -->
+  <rect x="6" y="7" width="2" height="1" fill="#e88aa0"/>
+  <rect x="24" y="7" width="2" height="1" fill="#e88aa0"/>
+
+  <!-- Head outline -->
+  <rect x="5" y="9" width="22" height="14" fill="#3a2a18"/>
+  <rect x="4" y="10" width="24" height="12" fill="#3a2a18"/>
+
+  <!-- Face inner (cream) -->
+  <rect x="6" y="11" width="20" height="10" fill="#f4e6c4"/>
+  <rect x="5" y="12" width="22" height="8" fill="#f4e6c4"/>
+
+  <!-- Eyes (big cute oval-ish blocks) -->
+  <rect x="9" y="13" width="3" height="3" fill="#3a2a18"/>
+  <rect x="20" y="13" width="3" height="3" fill="#3a2a18"/>
+  <!-- Eye highlights -->
+  <rect x="10" y="13" width="1" height="1" fill="#f4e6c4"/>
+  <rect x="21" y="13" width="1" height="1" fill="#f4e6c4"/>
+
+  <!-- Cheek blush -->
+  <rect x="6" y="16" width="2" height="2" fill="#e88aa0" opacity="0.65"/>
+  <rect x="24" y="16" width="2" height="2" fill="#e88aa0" opacity="0.65"/>
+
+  <!-- Nose -->
+  <rect x="15" y="17" width="2" height="1" fill="#e88aa0"/>
+
+  <!-- Mouth: little :3 -->
+  <rect x="13" y="18" width="2" height="1" fill="#3a2a18"/>
+  <rect x="17" y="18" width="2" height="1" fill="#3a2a18"/>
+  <rect x="15" y="19" width="2" height="1" fill="#3a2a18"/>
+
+  <!-- Three kibble pellets along the bottom -->
+  <rect x="8" y="25" width="3" height="3" fill="#c08a3a"/>
+  <rect x="9" y="26" width="1" height="1" fill="#e8b87a"/>
+  <rect x="14" y="26" width="4" height="3" fill="#c08a3a"/>
+  <rect x="15" y="27" width="2" height="1" fill="#e8b87a"/>
+  <rect x="21" y="25" width="3" height="3" fill="#c08a3a"/>
+  <rect x="22" y="26" width="1" height="1" fill="#e8b87a"/>
+</svg>
