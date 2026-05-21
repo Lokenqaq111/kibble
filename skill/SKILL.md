@@ -1,6 +1,6 @@
 ---
 name: kibble-health
-description: Use when the user wants to process the Kibble health-log inbox, backfill nutrition data for already-filed items, or sync an Apple Health export. Reads `~/Library/Application Support/kibble/config.toml`, sorts new photos in `inbox/` into `YYYY/MM/DD/<meal_type>/`, identifies image type (food / receipt / menu), looks up calories and macros via WebSearch, writes a `.nutrition.json` next to each image, updates `index.csv`, then commits + pushes. Enrich mode scans filed items missing `.nutrition.json` and fills them in. Apple Health sync mode streams `~/Desktop/apple_health_export/导出.xml` (or `export.xml`) into `health/daily.csv` + `health/workouts.csv` + `health/ecg/*.csv` inside the repo, deliberately excluding GPS routes (`workout-routes/*.gpx`). At the end of every Process/Enrich run, the skill MUST ask the user whether to sync Apple Health too. Triggered by phrases like "process kibble inbox", "整理 kibble", "process my food log", "补一下 nutrition", "kibble 营养信息", "sync apple health", "同步 apple health".
+description: Use when the user wants to process the Kibble health-log inbox or sync an Apple Health export. Reads `~/Library/Application Support/kibble/config.toml`, sorts new photos in `inbox/` into `YYYY/MM/DD/<meal_type>/`, identifies image type (food / receipt / menu), looks up calories and macros via WebSearch, writes a `.nutrition.json` next to each image, updates `index.csv`, then commits + pushes. Apple Health sync mode streams `~/Desktop/apple_health_export/导出.xml` (or `export.xml`) into `health/daily.csv` + `health/workouts.csv` + `health/ecg/*.csv` inside the repo, deliberately excluding GPS routes (`workout-routes/*.gpx`). At the end of every Process run, the skill MUST ask the user whether to sync Apple Health too. Triggered by phrases like "process kibble inbox", "整理 kibble", "process my food log", "sync apple health", "同步 apple health".
 metadata:
   short-description: Sort Kibble inbox photos, classify food vs receipts, look up nutrition via web search, sync Apple Health export aggregates
 ---
@@ -12,10 +12,9 @@ This skill is the consumer end of the Kibble pipeline. Kibble (the desktop app) 
 ## Modes
 
 1. **Process** (default) — drain `inbox/` into dated folders, annotate, commit.
-2. **Enrich** — scan filed items (`YYYY/MM/DD/<meal>/*.{jpg,heic,...}`) for ones missing a `.nutrition.json` sibling, fill them in, commit.
-3. **Apple Health sync** — parse `~/Desktop/apple_health_export/` into `<repo>/health/`. See [Apple Health sync](#apple-health-sync).
+2. **Apple Health sync** — parse `~/Desktop/apple_health_export/` into `<repo>/health/`. See [Apple Health sync](#apple-health-sync).
 
-Decide which mode based on the user's phrasing. If both Process and Enrich are needed in one run (new uploads since last enrich), do Process first, then Enrich on the remaining un-annotated filed items, then **one combined commit**. After Process or Enrich finish (and before printing the summary table), the skill **must ask the user**: `also sync Apple Health export? (y/n)`. If yes, run Apple Health sync and fold it into the same commit.
+Decide which mode based on the user's phrasing. After Process finishes (and before printing the summary table), the skill **must ask the user**: `also sync Apple Health export? (y/n)`. If yes, run Apple Health sync and fold it into the same commit.
 
 ## Inputs
 
@@ -23,7 +22,6 @@ None from the user. Everything is read from disk:
 
 - `~/Library/Application Support/kibble/config.toml` — for `repo_path` and `[meal_times]`
 - `<repo_path>/inbox/` — Process-mode items
-- `<repo_path>/<YYYY>/...` — Enrich-mode scan target
 - Each image's macOS metadata (`sips -g creation`)
 - Each image's pixels (Read into Claude for type detection + identification)
 - Sibling `.note.txt` if it exists
@@ -36,8 +34,8 @@ If the user explicitly passes a different repo path, honour it; otherwise use co
 2. **Preserve original bytes during processing.** Never re-encode HEIC or JPG. For HEIC vision, write a transient JPG to `/tmp/kibble-view-<random>.jpg` via `sips -s format jpeg`, Read it, then delete it. The original image is read once for vision, then deleted after `.nutrition.json` is written (see Step 6). Storage minimisation is preferred over keeping originals; everything needed for retrospective review must live in `.nutrition.json` and `.note.txt`.
 3. **`.note.txt` and `.nutrition.json` follow the image's logical slot** when filing (Process mode). The image itself is deleted; only the text artefacts persist.
 4. **Idempotent on collisions.** Destination filename collision → append `_1`, `_2`, …; apply the same suffix to all sibling files (note + nutrition). Never overwrite.
-5. **One commit per run**, even if Process and Enrich both ran. Message: `skill: process N + enrich M item(s)` (drop the part that's zero).
-6. **Empty work is success.** No images to process AND no items to enrich → print `nothing to do` and exit without a commit.
+5. **One commit per run.** Message: `skill: process N item(s)`.
+6. **Empty work is success.** No images to process → print `nothing to do` and exit without a commit.
 7. **Honest confidence.** Every nutrition.json must carry a `confidence: "high" | "med" | "low"` field per the [confidence rubric](#confidence-rubric). Do not promote `low` to `med` because the number "looks reasonable."
 
 ## Workflow
@@ -54,15 +52,13 @@ Abort with a clear error if `repo_path` is empty or missing on disk.
 
 ### Step 2 — Collect work
 
-**Process-mode items**: `ls -1 "$REPO/inbox/"`, filter to image extensions: `.jpg .jpeg .png .gif .webp .heic .heif .tif .tiff .bmp`. Note files (`*.note.txt`) are followers.
+`ls -1 "$REPO/inbox/"`, filter to image extensions: `.jpg .jpeg .png .gif .webp .heic .heif .tif .tiff .bmp`. Note files (`*.note.txt`) are followers.
 
-**Enrich-mode items**: `find "$REPO" -path "$REPO/inbox" -prune -o -type f \( -iname '*.heic' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) -print` — then drop any path that already has a sibling `<file>.nutrition.json`. (Going forward, Process mode deletes images on file, so Enrich mode will typically find nothing — it remains for legacy items processed under the old move-and-keep behaviour.)
-
-If both lists are empty, print `nothing to do` and exit.
+If the list is empty, print `nothing to do` and exit.
 
 ### Step 3 — Per-image: type detection + identification
 
-For each image (in either list), in order:
+For each image, in order:
 
 #### 3a — Capture time
 `sips -g creation "<path>"` → parse `creation: YYYY:MM:DD HH:MM:SS` (local clock). Fallback: `stat -f %Sm -t '%Y:%m:%d %H:%M:%S' "<path>"`. If both fail: `capture_time = "unknown"`, `meal_type = "unknown"`.
@@ -197,7 +193,7 @@ date,time,meal_type,image_type,food_label,calories,protein_g,carb_g,fat_g,confid
 
 Header is written only if file doesn't exist. Numeric fields are integers or empty string for `null`. Quote any field containing commas (RFC 4180). The `path` is relative to `<repo>`, the `note` is the user's original text (do NOT append receipt items here — they live in nutrition.json).
 
-For Enrich mode: rewrite the row if it already exists (match on `path`); otherwise append. Use a temp file + rename to avoid partial writes.
+Use a temp file + rename to avoid partial writes.
 
 ### Step 8 — Commit + push
 
@@ -210,10 +206,7 @@ if ! git diff --cached --quiet; then
 fi
 ```
 
-Message format:
-- Process only: `skill: process N item(s)`
-- Enrich only: `skill: enrich M item(s)`
-- Both: `skill: process N + enrich M item(s)`
+Message format: `skill: process N item(s)`.
 
 Singular/plural: `1 item` / `2 items`.
 
@@ -224,7 +217,7 @@ Push failures: print git's stderr verbatim, do not roll back. The work is still 
 Print exactly this shape (columns aligned, no trailing whitespace):
 
 ```
-processed N items, enriched M items, K errors
+processed N items, K errors
 
 12:25 lunch    food     beef noodles       ~650 kcal (med)    IMG_1728.HEIC
 18:22 dinner   receipt  mcdonalds receipt  ~1115 kcal (high)  IMG_1737.HEIC
@@ -242,7 +235,7 @@ Layout details:
 
 ## Apple Health sync
 
-This mode imports an iOS Health export into `<repo>/health/`. It is offered as a follow-up question at the end of every Process/Enrich run, and can also be invoked directly ("sync apple health", "同步 apple health").
+This mode imports an iOS Health export into `<repo>/health/`. It is offered as a follow-up question at the end of every Process run, and can also be invoked directly ("sync apple health", "同步 apple health").
 
 ### What gets synced
 
@@ -276,10 +269,9 @@ Expect ~15–60 seconds for a multi-year export. The script is streaming so memo
 
 ### Folding into the commit
 
-If Apple Health sync is part of a Process/Enrich run, fold the new files into the same commit. Commit message becomes:
+If Apple Health sync is part of a Process run, fold the new files into the same commit. Commit message becomes:
 
 - Process + health: `skill: process N item(s) + sync apple health`
-- Enrich + health: `skill: enrich M item(s) + sync apple health`
 - Health only: `skill: sync apple health (<date_range>)` where `<date_range>` is `YYYY-MM-DD..YYYY-MM-DD` taken from the script's stdout.
 
 ### Re-sync semantics
@@ -341,7 +333,6 @@ If unsure between two levels, pick the lower one.
 - **Cross-day photos** — file by *capture* date.
 - **WebSearch unavailable / rate-limited** — record `confidence: low`, `source_url: null`, add note `"WebSearch unavailable"`. Do not block the whole run.
 - **Repo path differs across machines** — config is the source of truth; do not hardcode any path.
-- **Enrich finds a stale `.nutrition.json`** (image deleted but json remains) — leave the json alone; do not auto-clean. Print a warning.
 - **Beverages with no calories** (water, cola zero) — calories may legitimately be 0. Do not downgrade confidence for zeroes; they're a real value.
 
 ## What this skill does NOT do
