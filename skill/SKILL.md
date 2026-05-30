@@ -1,8 +1,8 @@
 ---
 name: kibble-health
-description: Use when the user wants to process the Kibble health-log inbox or sync an Apple Health export. Reads `~/Library/Application Support/kibble/config.toml`, sorts new photos in `inbox/` into `YYYY/MM/DD/<meal_type>/`, identifies image type (food / receipt / menu), looks up calories and macros via WebSearch, writes a `.nutrition.json` next to each image, updates `index.csv`, then commits + pushes. Apple Health sync mode streams `~/Desktop/apple_health_export/导出.xml` (or `export.xml`) into `health/daily.csv` + `health/workouts.csv` + `health/ecg/*.csv` inside the repo, deliberately excluding GPS routes (`workout-routes/*.gpx`). At the end of every Process run, the skill MUST ask the user whether to sync Apple Health too. Triggered by phrases like "process kibble inbox", "整理 kibble", "process my food log", "sync apple health", "同步 apple health".
+description: Use when the user wants to process the Kibble health-log inbox, sync an Apple Health export, or generate a diet evaluation report. Reads `~/Library/Application Support/kibble/config.toml`, sorts new photos in `inbox/` into `YYYY/MM/DD/<meal_type>/`, identifies image type (food / receipt / menu), looks up calories and macros via WebSearch, writes a `.nutrition.json` next to each image, updates `index.csv`, then commits + pushes. Apple Health sync mode streams `~/Desktop/apple_health_export/导出.xml` (or `export.xml`) into `health/daily.csv` + `health/workouts.csv` + `health/ecg/*.csv` inside the repo, deliberately excluding GPS routes (`workout-routes/*.gpx`). Diet report mode aggregates `index.csv` into a Word report on the Desktop with a per-day macro table and trend line-charts (calories/fat/protein) carrying red threshold lines. At the end of every Process run, the skill MUST ask the user whether to sync Apple Health too. Triggered by phrases like "process kibble inbox", "整理 kibble", "process my food log", "sync apple health", "同步 apple health", "diet report", "饮食报告", "评价我的饮食".
 metadata:
-  short-description: Sort Kibble inbox photos, classify food vs receipts, look up nutrition via web search, sync Apple Health export aggregates
+  short-description: Sort Kibble inbox photos, classify food vs receipts, look up nutrition via web search, sync Apple Health export aggregates, generate diet evaluation report
 ---
 
 # Kibble Inbox Processor
@@ -13,8 +13,11 @@ This skill is the consumer end of the Kibble pipeline. Kibble (the desktop app) 
 
 1. **Process** (default) — drain `inbox/` into dated folders, annotate, commit.
 2. **Apple Health sync** — parse `~/Desktop/apple_health_export/` into `<repo>/health/`. See [Apple Health sync](#apple-health-sync).
+3. **Diet report** — aggregate `index.csv` into a Word report on the Desktop (table + trend charts + data-driven signals). See [Diet report](#diet-report). Read-only on the repo; never commits.
 
 Decide which mode based on the user's phrasing. After Process finishes (and before printing the summary table), the skill **must ask the user**: `also sync Apple Health export? (y/n)`. If yes, run Apple Health sync and fold it into the same commit.
+
+Diet report is a standalone, read-only mode — triggered by phrases like "diet report", "饮食报告", "评价/看看我的饮食", "evaluate my eating". It does not touch `inbox/`, does not commit, and is never auto-offered after Process (unlike Apple Health sync).
 
 ## Inputs
 
@@ -311,6 +314,55 @@ Report generation depends on `matplotlib`, `pandas`, `numpy`, `python-docx`. On 
 - **XML truncated / parse error** — script raises; do not partial-write. Print the line number from the error.
 - **Repo's `health/` folder doesn't exist** — script creates it.
 
+## Diet report
+
+A standalone, read-only mode that turns the accumulated meal log (`<repo>/index.csv`) into a Word evaluation report on the Desktop. It does **not** read `inbox/`, does **not** sync Apple Health, and does **not** commit anything — it only reads `index.csv`.
+
+Triggered by phrases like "diet report", "饮食报告", "评价/看看我的饮食", "evaluate my eating". Never auto-offered after Process (that question is reserved for Apple Health sync).
+
+### Run
+
+```bash
+python3 ~/.claude/skills/kibble-health/generate_diet_report.py <repo_path>
+```
+
+Writes `~/Desktop/kibble-diet-report-<YYYY-MM-DD>.docx` (overwrites same-day). Surface the path so the user can `open` it.
+
+### What the report contains
+
+The script (`generate_diet_report.py`) produces everything **deterministically** from `index.csv`:
+
+- **Overview** — days logged, complete vs partial days, breakfast coverage, fast-food and sweet/fried counts.
+- **Per-day macro table** — calories/protein/carb/fat per day, plus auto notes (`无早餐`, `仅单餐·未记全`, `脂肪超100g`) and a complete-days average row.
+- **Trend line-charts** — one PNG per entry in the `THRESHOLDS` dict (default: calories, fat, protein), each with a **red dashed threshold line**. Each threshold has a `kind`: `ceiling` (a day **over** the line is marked red — calories, fat) or `floor` (a day **under** the line is marked red — protein minimum). Crossing days get a red marker + value annotation, and a caption lists their dates.
+- **Data-driven signals** — `build_signals()` emits "做得好" and "需要改进" bullets. **Every bullet references a real number** (e.g. "11 天里仅 1 天记录早餐"); a signal in the noise band emits **no bullet** rather than a platitude — same philosophy as `build_recommendations()` in `generate_report.py`.
+
+### Charts excluded partial days
+
+Charts plot **only "complete" days** (≥2 meal slots or ≥2 items) so a single-meal day doesn't masquerade as a calorie crash and skew the trend. The per-day table still lists every day (partial ones flagged in the notes column).
+
+### Fonts
+
+Chart axis/title labels are **English on purpose** — matplotlib renders CJK as tofu boxes without a bundled CJK font. The Word body text is full Chinese; only the embedded chart images use English labels. Do not "fix" this by forcing a Chinese font unless one is known-present.
+
+### Tuning
+
+Thresholds and label keyword buckets (`THRESHOLDS`, `FAST`, `SWEET`, `FRIED`, `VEG`, `FAT_NOTE_G`, `HIGH_CAL_DAY`) live at the top of `generate_diet_report.py`. To add a chart, add an entry to `THRESHOLDS` with a `label`, `line`, and `kind`. To add a signal, append to `build_signals()` with a clear (number-bearing threshold → bullet string) mapping. Do not add platitudes — only observations tied to a data signal.
+
+### Layering qualitative interpretation
+
+The script intentionally does **not** hardcode prose narrative (which would be specific to one dataset). When the user wants a richer read, layer the qualitative interpretation in the conversation on top of the deterministic report — do not bake dataset-specific commentary into the script.
+
+### Separation rule (same as Apple Health)
+
+The report and its chart PNGs are derived artefacts → **Desktop only, never into the repo**. The repo holds only source data (`index.csv` + nutrition JSON). Re-running must not churn git history.
+
+### Dependencies / failure modes
+
+- Needs `python-docx` + `matplotlib` (`pip3 install python-docx matplotlib`). If `python3 -c "import docx, matplotlib"` fails, tell the user and skip.
+- **No `index.csv`** — abort with a message to run Process mode first.
+- **Empty `index.csv`** — abort ("nothing to report").
+
 ## Confidence rubric
 
 | Source | Confidence |
@@ -339,6 +391,5 @@ If unsure between two levels, pick the lower one.
 
 - Re-encode or compress images.
 - Re-classify already-filed items into different meal folders (capture time is canonical).
-- Generate per-day or per-week summaries (separate skill, future).
 - Mutate `.note.txt` after it's filed (notes are user content, append-only via re-upload).
 - Estimate calories without a WebSearch result for chain-restaurant items (low confidence, no `source_url` → flag for review, don't fabricate).
